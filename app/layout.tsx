@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { Toast } from '@/components/ui/toast';
 
 export const metadata: Metadata = {
   title: "EZBiliMusic",
@@ -16,6 +17,7 @@ export default function RootLayout({
       <body
         className={`antialiased`}
       >
+        <Toast />
         {children}
       </body>
     </html>

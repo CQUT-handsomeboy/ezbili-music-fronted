@@ -13,7 +13,7 @@ import { createContext, useContext } from "react"
 import { extract } from "@/lib/regex"
 import { toast } from "sonner"
 
-import type { Selection } from "react-aria-components"
+import { Link, type Selection } from "react-aria-components"
 
 interface Item {
   id: number;
@@ -46,16 +46,16 @@ function RegexSheet() {
     <Sheet.Content>
       <Sheet.Header>
         <Sheet.Title>设置规则</Sheet.Title>
-        <Sheet.Description>统一设置作者，然后使用正则表达式设置标题的匹配规则。</Sheet.Description>
+        <Sheet.Description>统一设置作者，然后使用正则表达式设置标题的匹配规则。推荐账号：<Link className="text-cyan-600" href="https://space.bilibili.com/3493093607213343">JLRS-LeoFM</Link></Sheet.Description>
       </Sheet.Header>
+
       <Sheet.Body className="space-y-4">
         <TextField label="标题<正则>" type="text" placeholder="输入匹配标题的正则表达式"
           value={titleRegex} onChange={setTitleRegex} />
         <Button intent="secondary" onClick={() => setTitleRegex("《([^》]+)》")}>{"书名号规则"}</Button>
-        <Button intent="secondary" onClick={() => setTitleRegex("")}>{"整个"}</Button>
+        <Button intent="secondary" onClick={() => setTitleRegex("")}>{"整个(留空)"}</Button>
         {mode == RegexMode.TitleRegexAndArtistRegex && <>
           <TextField label="歌手<正则>" type="text" placeholder="输入匹配歌手的正则表达式" value={artistRegex} onChange={setArtistRegex} />
-          <Button intent="secondary">{"空格到书名号开始"}</Button>
         </>}
         {mode == RegexMode.TitleRegexAndOneArtist && <TextField label="歌手<名字>" type="text" placeholder="输入歌手的名字" value={artist} onChange={setArtist} />}
 
@@ -102,8 +102,9 @@ export default function Home() {
   const [songsOriginal, setSongsOriginal] = useState<Item[]>([])
   const [allSelected, setAllSelected] = useState<boolean>(false)
   const [selectedKeys, setSelectedKeys] = useState<Selection>(new Set([]))
-  const BVid = useRef<string>(null)
+  const BVidAndAid = useRef<(string | number)[]>([])
   const idTocid = useRef<Map<number, number>>(new Map())
+  const [progressValue, setProgressValue] = useState<number>(0)
 
   useEffect(() => {
     if (allSelected)
@@ -138,7 +139,9 @@ export default function Home() {
             })
               .then((response) => response.json())
               .then((data) => {
-                BVid.current = data.meta.bvid as string
+                setProgressValue(0)
+                setSelectedKeys(new Set())
+                BVidAndAid.current = [data.meta.bvid as string, data.meta.aid as number]
                 const pages: { cid: number, part: string, page: number }[] = data.meta.videoData.pages
                 setSongsOriginal(pages.map((page) => {
                   idTocid.current.set(page.page, page.cid)
@@ -163,19 +166,48 @@ export default function Home() {
             </Toolbar.Item>
             <Toolbar.Separator />
             <Button intent="outline"
-              onClick={() => {
-                if (selectedKeys instanceof Set && selectedKeys.size == 0) {
+              onClick={async () => {
+                if (!(selectedKeys instanceof Set))
+                  return
+                if (selectedKeys.size == 0) {
                   toast.error("选择要下载的歌曲")
                   return
                 }
-
-                if (selectedKeys instanceof Set) {
-                  for (const id of selectedKeys) {
-                    const index = parseInt(id.toString()) - 1
-                    const { description: artist, label: title } = songsOriginal[index]
-
-                  }
+                if (!BVidAndAid.current) {
+                  toast.error("找不到bvid和aid呢")
+                  return
                 }
+                const keysSize = selectedKeys.size
+                setProgressValue(0)
+                await new Promise(resolve => setTimeout(resolve, 1000))
+                for (const id of selectedKeys) {
+                  const index = parseInt(id.toString()) - 1
+                  const { description: artist, label: title } = songsFiltered[index]
+                  const bvid = BVidAndAid.current[0] as string
+                  const aid = BVidAndAid.current[1] as number
+                  const cid = idTocid.current.get(index + 1) as number
+                  await fetch(new URL("https://api.xiaoyin.link/download"), {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                      title, artist, bvid, cid, aid
+                    })
+                  }).then(async (res) => {
+                    if (res.status == 200)
+                      return
+                    // 下载失败，不论什么原因
+                    const errorInfo = (await res.json()).error
+                    throw new Error(errorInfo)
+                  }).then(() => {
+                    setProgressValue((index + 1) / keysSize * 100)
+                  }).catch((e) => {
+                    toast.error(`第${index}个失败，因为` + e)
+                  })
+                  await new Promise(resolve => setTimeout(resolve, 100))
+                }
+                setAllSelected(false)
               }}
             >下载选中项</Button>
             <RegexContext.Provider value={{ songsOriginal, setSongsFiltered }}>
@@ -184,7 +216,7 @@ export default function Home() {
           </Toolbar.Group>
 
         </Toolbar>
-        <ProgressBar label="下载进度" value={25} />
+        <ProgressBar label="下载进度" value={progressValue} />
         <Choicebox
           className="mx-auto w-full h-[500px] border p-2 overflow-y-auto"
           selectionMode="multiple"
@@ -195,7 +227,7 @@ export default function Home() {
           columns={1}
           items={songsFiltered}
         >
-          {(item) => <Choicebox.Item className="max-h-[75px]" {...item} />}
+          {(item) => <Choicebox.Item className="max-h-[100px]" {...item} />}
         </Choicebox>
 
       </div>

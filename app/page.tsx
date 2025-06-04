@@ -12,6 +12,7 @@ import { ProgressBar } from "@/components/ui/progress-bar"
 import { createContext, useContext } from "react"
 import { extract } from "@/lib/regex"
 import { toast } from "sonner"
+import { LineShadowText } from "@/components/magicui/line-shadow-text";
 
 import { Link, type Selection } from "react-aria-components"
 
@@ -21,9 +22,21 @@ interface Item {
   description: string;
 }
 
+enum ArtistRegexMode {
+  OneArtist = 0b00, // 指定统一艺术家
+  ArtistRegex = 0b01 // 艺术家正则
+}
+
+enum TitleRegexMode {
+  SpecTitle = 0b00, // 指定标题 (确保只有一首歌曲)
+  TitleRegex = 0b10 // 标题正则 (多首歌曲，统一匹配)
+}
+
 enum RegexMode {
-  TitleRegexAndArtistRegex = 1,
-  TitleRegexAndOneArtist = 2,
+  OneArtistAndSpecTitle = ArtistRegexMode.OneArtist | TitleRegexMode.SpecTitle,
+  OneArtistAndTitleRegex = ArtistRegexMode.OneArtist | TitleRegexMode.TitleRegex,
+  ArtistRegexAndSpecTitle = ArtistRegexMode.ArtistRegex | TitleRegexMode.SpecTitle,
+  ArtistRegexAndTitleRegex = ArtistRegexMode.ArtistRegex | TitleRegexMode.TitleRegex,
 }
 
 
@@ -36,8 +49,11 @@ const RegexContext = createContext<{
 })
 
 function RegexSheet() {
-  const [mode, setMode] = useState<RegexMode>(RegexMode.TitleRegexAndOneArtist)
+  // 默认统一艺术家和标题(要确保是不是单曲)
+  const [artistMode, setArtistMode] = useState<ArtistRegexMode>(ArtistRegexMode.OneArtist)
+  const [titleMode, setTitleMode] = useState<TitleRegexMode>(TitleRegexMode.SpecTitle)
   const { songsOriginal, setSongsFiltered } = useContext(RegexContext)
+  const [title, setTitle] = useState<string>("")
   const [titleRegex, setTitleRegex] = useState<string>("")
   const [artist, setArtist] = useState<string>("")
   const [artistRegex, setArtistRegex] = useState<string>("")
@@ -50,16 +66,31 @@ function RegexSheet() {
       </Sheet.Header>
 
       <Sheet.Body className="space-y-4">
-        <TextField label="标题<正则>" type="text" placeholder="输入匹配标题的正则表达式"
-          value={titleRegex} onChange={setTitleRegex} />
-        <Button intent="secondary" onClick={() => setTitleRegex("《([^》]+)》")}>{"书名号规则"}</Button>
-        <Button intent="secondary" onClick={() => setTitleRegex("")}>{"整个(留空)"}</Button>
-        {mode == RegexMode.TitleRegexAndArtistRegex && <>
+        {titleMode == TitleRegexMode.TitleRegex && <>
+          <TextField label="标题<正则>" type="text" placeholder="输入匹配标题的正则表达式"
+            value={titleRegex} onChange={setTitleRegex} />
+          <div className="grid grid-cols-2 gap-2">
+            <Button intent="secondary" onClick={() => setTitleRegex("《([^》]+)》")}>{"书名号规则"}</Button>
+            <Button intent="secondary" onClick={() => setTitleRegex("")}>{"整个(留空)"}</Button>
+          </div>
+        </>}
+
+        {titleMode == TitleRegexMode.SpecTitle && <TextField label="标题<名字>" type="text" placeholder="直接输入标题"
+          value={title} onChange={setTitle} />}
+
+        <Switch isSelected={titleMode == TitleRegexMode.SpecTitle}
+          onChange={(isSelected: boolean) =>
+            isSelected ? setTitleMode(TitleRegexMode.SpecTitle) : setTitleMode(TitleRegexMode.TitleRegex)
+          }>直接设置单曲标题</Switch>
+
+        {artistMode == ArtistRegexMode.ArtistRegex && <>
           <TextField label="歌手<正则>" type="text" placeholder="输入匹配歌手的正则表达式" value={artistRegex} onChange={setArtistRegex} />
         </>}
-        {mode == RegexMode.TitleRegexAndOneArtist && <TextField label="歌手<名字>" type="text" placeholder="输入歌手的名字" value={artist} onChange={setArtist} />}
 
-        <Switch isSelected={mode == RegexMode.TitleRegexAndOneArtist} onChange={(isSelected: boolean) => isSelected ? setMode(RegexMode.TitleRegexAndOneArtist) : setMode(RegexMode.TitleRegexAndArtistRegex)}>使用统一歌手</Switch>
+        {artistMode == ArtistRegexMode.OneArtist && <TextField label="歌手<名字>" type="text" placeholder="输入歌手的名字" value={artist} onChange={setArtist} />}
+
+        <Switch isSelected={artistMode == ArtistRegexMode.OneArtist}
+          onChange={(isSelected: boolean) => isSelected ? setArtistMode(ArtistRegexMode.OneArtist) : setArtistMode(ArtistRegexMode.ArtistRegex)}>使用统一歌手</Switch>
       </Sheet.Body>
       <Sheet.Footer>
         <Button intent="outline" type="submit"
@@ -69,22 +100,53 @@ function RegexSheet() {
         </Button>
         <Button intent="primary" type="submit"
           onClick={() => {
-            switch (mode) {
-              case RegexMode.TitleRegexAndOneArtist:
-                if (artist == "")
+            switch (artistMode | titleMode) {
+              case RegexMode.OneArtistAndSpecTitle:
+                // 单曲
+                if (title == "" || artist == "") {
+                  toast.error("请输入标题或艺术家")
                   return
+                }
+                if (songsOriginal.length != 1) {
+                  toast.error("确保只有一首歌曲")
+                  return
+                }
+                setSongsFiltered(songsOriginal.map(song => ({
+                  id: song.id,
+                  label: title,
+                  description: artist,
+                })))
+                break;
+
+              case RegexMode.ArtistRegexAndSpecTitle:
+                // 这种情况不存在
+                toast.error("此模式无效")
+                break;
+
+              case RegexMode.OneArtistAndTitleRegex:
+                // 注意这种模式titleRegex为空是有意义的
+                if (artist == "") {
+                  toast.error("请输入艺术家")
+                  return
+                }
                 setSongsFiltered(songsOriginal.map(song => ({
                   id: song.id,
                   label: extract(titleRegex, song.label),
                   description: artist,
                 })))
                 break;
-              case RegexMode.TitleRegexAndArtistRegex:
-                setSongsFiltered(songsOriginal.map(song => ({
-                  id: song.id,
-                  label: extract(titleRegex, song.label),
-                  description: extract(artistRegex, song.label),
-                })))
+
+              case RegexMode.ArtistRegexAndTitleRegex:
+                // 注意这种模式titleRegex和artistRegex为空都是有意义的
+                setSongsFiltered(songsOriginal.map(song => {
+                  const theTitle = extract(titleRegex, song.label)
+                  const theArtist = extract(artistRegex, song.label)
+                  return {
+                    id: song.id,
+                    label: theTitle,
+                    description: theArtist,
+                  }
+                }))
                 break;
             }
           }}
@@ -106,6 +168,50 @@ export default function Home() {
   const idTocid = useRef<Map<number, number>>(new Map())
   const [progressValue, setProgressValue] = useState<number>(0)
 
+  const SearchBarInput = () => <TextField
+    className={"flex-1"}
+    name="name"
+    type="text"
+    placeholder="https://www.bilibili.com/video/BV1YmFPe4EnY"
+    value={searchbar}
+    onChange={(value: string) => setSearchbar(value)}
+  />
+  const SearchButton = () => <Button onClick={() => {
+    if (searchbar === "") {
+      toast.error("输入链接")
+      return
+    }
+    fetch(new URL("https://api.xiaoyin.link/metadata"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        url: searchbar
+      })
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        setProgressValue(0)
+        setSelectedKeys(new Set())
+        BVidAndAid.current = [data.meta.bvid as string, data.meta.aid as number]
+        const pages: { cid: number, part: string, page: number }[] = data.meta.videoData.pages
+        setSongsOriginal(pages.map((page) => {
+          idTocid.current.set(page.page, page.cid)
+          page.page
+          page.cid
+          return {
+            id: page.page,
+            label: page.part,
+            description: "佚名",
+            bvid: "",
+            cid: page.cid
+          }
+        }))
+        setSongsFiltered(songsOriginal)
+      })
+  }}>查找</Button>
+
   useEffect(() => {
     if (allSelected)
       setSelectedKeys(new Set(songsFiltered.map((song) => song.id)))
@@ -116,49 +222,10 @@ export default function Home() {
   return (
     <div className="flex min-h-screen flex-row items-center justify-center md:px-0">
       <div className="space-y-3 w-full md:max-w-[500px] px-3 md:mx-auto">
-        <TextField
-          name="name"
-          type="text"
-          label="粘贴Blibili MV视频链接"
-          placeholder="https://www.bilibili.com/video/BV1YmFPe4EnY"
-          value={searchbar}
-          onChange={(value: string) => setSearchbar(value)}
-          suffix={<Button onClick={() => {
-            if (searchbar === "") {
-              toast.error("输入链接")
-              return
-            }
-            fetch(new URL("https://api.xiaoyin.link/metadata"), {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
-                url: searchbar
-              })
-            })
-              .then((response) => response.json())
-              .then((data) => {
-                setProgressValue(0)
-                setSelectedKeys(new Set())
-                BVidAndAid.current = [data.meta.bvid as string, data.meta.aid as number]
-                const pages: { cid: number, part: string, page: number }[] = data.meta.videoData.pages
-                setSongsOriginal(pages.map((page) => {
-                  idTocid.current.set(page.page, page.cid)
-                  page.page
-                  page.cid
-                  return {
-                    id: page.page,
-                    label: page.part,
-                    description: "佚名",
-                    bvid: "",
-                    cid: page.cid
-                  }
-                }))
-                setSongsFiltered(songsOriginal)
-              })
-          }}>查找</Button>}
-        />
+        <div className="flex flex-row-reverse gap-2">
+          <SearchButton />
+          <SearchBarInput />
+        </div>
         <Toolbar aria-label="Toolbars">
           <Toolbar.Group aria-label="download selections">
             <Toolbar.Item aria-label="select all" size="square-petite" intent="outline" onChange={(isSelected: boolean) => setAllSelected(isSelected)}>

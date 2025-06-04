@@ -168,6 +168,12 @@ export default function Home() {
   const idTocid = useRef<Map<number, number>>(new Map())
   const [progressValue, setProgressValue] = useState<number>(0)
 
+  useEffect(() => {
+    setProgressValue(0)
+    setSelectedKeys(new Set())
+    setSongsFiltered(songsOriginal)
+  }, [songsOriginal])
+
   const SearchBarInput = () => <TextField
     className={"flex-1"}
     name="name"
@@ -181,6 +187,7 @@ export default function Home() {
       toast.error("输入链接")
       return
     }
+
     fetch(new URL("https://api.xiaoyin.link/metadata"), {
       method: "POST",
       headers: {
@@ -192,8 +199,6 @@ export default function Home() {
     })
       .then((response) => response.json())
       .then((data) => {
-        setProgressValue(0)
-        setSelectedKeys(new Set())
         BVidAndAid.current = [data.meta.bvid as string, data.meta.aid as number]
         const pages: { cid: number, part: string, page: number }[] = data.meta.videoData.pages
         setSongsOriginal(pages.map((page) => {
@@ -208,7 +213,6 @@ export default function Home() {
             cid: page.cid
           }
         }))
-        setSongsFiltered(songsOriginal)
       })
   }}>查找</Button>
 
